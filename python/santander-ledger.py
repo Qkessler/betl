@@ -21,14 +21,31 @@ def create_ledger_transaction(transaction):
 
 
 def main():
-    wb = xlrd.open_workbook(sys.argv[1], logfile=open(os.devnull, 'w'))
+    inputfile = ''
+    outputfile = ''
+    try:
+        opts, args = getopt.getopt(argv,"hi:o:",["input=","output="])
+    except getopt.GetoptError:
+        print('santander-ledger.py -i <inputfile> -o <outputfile>')
+        sys.exit(2)
+        for opt, arg in opts:
+            if opt == '-h':
+                print('santander-ledger.py -i <inputfile> -o <outputfile>')
+                sys.exit()
+            elif opt in ("-i", "--input"):
+                inputfile = arg
+            elif opt in ("-o", "--output"):
+                outputfile = arg
+
+    wb = xlrd.open_workbook(inputfile, logfile=open(os.devnull, 'w'))
     transactions = pd.read_excel(wb)[7:]
     transactions.columns = ["op_date", "value_date", "description", "amount", "total"]
 
     transactions_string = '\n'.join((create_ledger_transaction(transaction)
                                      for transaction in transactions.itertuples()))
 
-    print(transactions_string)
+    with open(outputfile, 'w') as f:
+        f.write(transactions_string)
 
 
 if __name__=="__main__":
