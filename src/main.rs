@@ -1,19 +1,17 @@
-use calamine::{
-    open_workbook, open_workbook_auto, DataType, Range, RangeDeserializerBuilder, Reader, Xls,
-};
-use chrono::{DateTime, NaiveDate, Utc};
+use calamine::{open_workbook, DataType, Range, RangeDeserializerBuilder, Reader, Xls};
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    env,
     fs::File,
-    io::{self, BufReader, BufWriter, Error, Result, Write},
-    path::PathBuf,
+    io::{self, BufReader, Error, Result, Write},
+    path::Path,
 };
 
 const PATH: &str = "/tmp/export2022819.xls";
 const SHEET_NAME: &str = "Movimientos";
 const DATE_FORMAT: &str = "%d/%m/%Y";
+const ACCOUNT: &str = "Assets:Checking";
 const CONFIG_FILE: &str = "/Users/enrikes/.config/santander_ledger.json";
 const HEADERS: &[&str] = &[
     "fecha_operacion",
@@ -107,6 +105,33 @@ fn compute_transactions(path: &str, config: &Config) {
             .collect();
 
         println!("{:?}", transactions);
+
+        write_transactions(&transactions, path, config);
+    }
+}
+
+fn build_transaction_string(transaction: &Transaction) -> String {
+    format!(
+        "{} * {}\n    {}               {}€\n\n",
+        transaction
+            .fecha_operacion
+            .expect("Date should be present")
+            .format("%Y-%m-%d"),
+        transaction.concepto,
+        ACCOUNT,
+        transaction.importe
+    )
+}
+
+fn write_transactions(transactions: &[Transaction], path: &str, config: &Config) {
+    let path = Path::new(path).with_extension("ledger");
+    if let Ok(mut file) = File::create(path) {
+        transactions.iter().for_each(|transaction| {
+            let transaction_string = build_transaction_string(transaction);
+            print!("{}", transaction_string);
+            file.write_all(transaction_string.as_bytes())
+                .unwrap_or_else(|_| panic!("Unable to write transaction {:?}", transaction));
+        });
     }
 }
 
