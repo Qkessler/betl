@@ -4,12 +4,12 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
+    env,
     fs::File,
     io::{self, BufReader, Error, Result, Write},
     path::Path,
 };
 
-const PATH: &str = "/tmp/export2022820.xls";
 const SHEET_NAME: &str = "Movimientos";
 const DATE_FORMAT: &str = "%d/%m/%Y";
 const ACCOUNT: &str = "Assets:Checking";
@@ -54,7 +54,7 @@ struct Transaction {
     #[serde(with = "date_serde")]
     fecha_valor: Option<NaiveDate>,
     concepto: String,
-    importe: isize,
+    importe: f32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -115,7 +115,7 @@ fn build_transaction_string(transaction: &Transaction, config: &Config) -> Strin
     // 1. Match the transaction.concepto with the regex that is stored in the key part of the hashmap.
     // 2. If the key is matched, I'll take the value from the hashmap and fill the string below.
     let mut transaction_string = format!(
-        "{} * {}\n    {}               {}€\n",
+        "{} * {}\n    {}               {:.2}€\n",
         transaction
             .fecha_operacion
             .expect("Date should be present")
@@ -154,8 +154,9 @@ fn write_transactions(transactions: &[Transaction], path: &str, config: &Config)
 }
 
 fn main() {
+    let input_file = env::args().nth(1).expect("Please provide an input file.");
     let file = File::open(CONFIG_FILE).unwrap();
     let reader = BufReader::new(file);
     let config: Config = serde_json::from_reader(reader).unwrap();
-    compute_transactions(PATH, &config);
+    compute_transactions(input_file.as_str(), &config);
 }
