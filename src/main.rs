@@ -136,7 +136,7 @@ fn build_transaction_string(transaction: &Transaction, config: &Config) -> Strin
             config.mappings.get(matched_concepto).unwrap()
         )
     } else {
-        transaction_string.push_str("\n");
+        transaction_string.push('\n');
         transaction_string
     }
 }
