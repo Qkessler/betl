@@ -1,5 +1,6 @@
 use calamine::{open_workbook, DataType, Range, RangeDeserializerBuilder, Reader, Xls};
 use chrono::NaiveDate;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -8,7 +9,7 @@ use std::{
     path::Path,
 };
 
-const PATH: &str = "/tmp/export2022819.xls";
+const PATH: &str = "/tmp/export2022820.xls";
 const SHEET_NAME: &str = "Movimientos";
 const DATE_FORMAT: &str = "%d/%m/%Y";
 const ACCOUNT: &str = "Assets:Checking";
@@ -65,7 +66,7 @@ fn skip_to_header_row(
     range: Range<DataType>,
     expected_headers: Vec<&str>,
 ) -> Result<Range<DataType>> {
-    if let Some((ix, _)) = range.rows().enumerate().find(|(i, row)| {
+    if let Some((ix, _)) = range.rows().enumerate().find(|(_, row)| {
         expected_headers
             .iter()
             .all(|h| row.iter().any(|cell: &DataType| &cell.to_string() == h))
@@ -93,7 +94,6 @@ fn skip_rows(range: Range<DataType>, n: u32) -> Result<Range<DataType>> {
 }
 
 fn compute_transactions(path: &str, config: &Config) {
-    println!("{:?}", config);
     let mut workbook: Xls<_> = open_workbook(path).expect("Cannot open file");
     if let Some(Ok(worksheet)) = workbook.worksheet_range(SHEET_NAME) {
         let transactions_skipped =
@@ -104,15 +104,18 @@ fn compute_transactions(path: &str, config: &Config) {
             .map(|transaction| transaction.unwrap())
             .collect();
 
-        println!("{:?}", transactions);
-
         write_transactions(&transactions, path, config);
     }
 }
 
-fn build_transaction_string(transaction: &Transaction) -> String {
-    format!(
-        "{} * {}\n    {}               {}€\n\n",
+fn build_transaction_string(transaction: &Transaction, config: &Config) -> String {
+    // Want to use the config to write the transactions if the concept is already present. The way I
+    // want to do it is by taking a regex as the key on the config file. I would then:
+
+    // 1. Match the transaction.concepto with the regex that is stored in the key part of the hashmap.
+    // 2. If the key is matched, I'll take the value from the hashmap and fill the string below.
+    let mut transaction_string = format!(
+        "{} * {}\n    {}               {}€\n",
         transaction
             .fecha_operacion
             .expect("Date should be present")
@@ -120,14 +123,29 @@ fn build_transaction_string(transaction: &Transaction) -> String {
         transaction.concepto,
         ACCOUNT,
         transaction.importe
-    )
+    );
+
+    if let Some(matched_concepto) = config.mappings.keys().find(|regex| {
+        Regex::new(regex)
+            .unwrap()
+            .is_match(transaction.concepto.as_str())
+    }) {
+        format!(
+            "{}    {}\n\n",
+            transaction_string,
+            config.mappings.get(matched_concepto).unwrap()
+        )
+    } else {
+        transaction_string.push_str("\n");
+        transaction_string
+    }
 }
 
 fn write_transactions(transactions: &[Transaction], path: &str, config: &Config) {
     let path = Path::new(path).with_extension("ledger");
     if let Ok(mut file) = File::create(path) {
         transactions.iter().for_each(|transaction| {
-            let transaction_string = build_transaction_string(transaction);
+            let transaction_string = build_transaction_string(transaction, config);
             print!("{}", transaction_string);
             file.write_all(transaction_string.as_bytes())
                 .unwrap_or_else(|_| panic!("Unable to write transaction {:?}", transaction));
