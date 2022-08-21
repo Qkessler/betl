@@ -75,19 +75,12 @@ fn skip_rows(range: Range<DataType>, n: u32) -> io::Result<Range<DataType>> {
     Ok(range.range((start.0 + n, start.1), end))
 }
 
-fn compute_transactions(path: &str, config: Option<&Config>) {
-    let mut workbook: Xls<_> = open_workbook(path).expect("Cannot open file");
-    if let Some(Ok(worksheet)) = workbook.worksheet_range(SHEET_NAME) {
-        let transactions_skipped =
-            skip_to_header_row(worksheet, HEADERS.to_vec()).expect("should work");
-        let transactions: Vec<Transaction> = RangeDeserializerBuilder::with_headers(HEADERS)
-            .from_range::<_, Transaction>(&transactions_skipped)
-            .expect("Deserializer should work.")
-            .map(|transaction| transaction.unwrap())
-            .collect();
-
-        write_transactions(&transactions, path, config);
-    }
+fn parse_transactions(range: &Range<DataType>) -> Vec<Transaction> {
+    RangeDeserializerBuilder::with_headers(HEADERS)
+        .from_range::<_, Transaction>(range)
+        .expect("Deserializer should work.")
+        .map(|transaction| transaction.unwrap())
+        .collect()
 }
 
 fn build_transaction_string(transaction: &Transaction, config: Option<&Config>) -> String {
@@ -135,6 +128,18 @@ fn write_transactions(transactions: &[Transaction], path: &str, config: Option<&
     }
 }
 
+fn modify_headers(input_file: &str) -> io::Result<Range<DataType>> {
+    let mut workbook: Xls<_> = open_workbook(input_file).expect("Cannot open file");
+    if let Some(Ok(worksheet)) = workbook.worksheet_range(SHEET_NAME) {
+        Ok(skip_to_header_row(worksheet, HEADERS.to_vec()).expect("should work"))
+    } else {
+        Err(Error::new(
+            io::ErrorKind::Other,
+            format!("Couldn't open worksheet for SHEET_NAME = {:?}", SHEET_NAME),
+        ))
+    }
+}
+
 fn main() {
     let input_file = env::args().nth(1).expect("Please provide an input file.");
     let home_dir = dirs::home_dir().unwrap().join(CONFIG_FILE);
@@ -148,5 +153,7 @@ fn main() {
         None
     };
 
-    compute_transactions(input_file.as_str(), config.as_ref());
+    let workbook = modify_headers(&input_file).unwrap();
+    let transactions = parse_transactions(&workbook);
+    write_transactions(&transactions, &input_file, config.as_ref());
 }
