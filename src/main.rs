@@ -13,7 +13,7 @@ use std::{
 const SHEET_NAME: &str = "Movimientos";
 const DATE_FORMAT: &str = "%d/%m/%Y";
 const ACCOUNT: &str = "Assets:Checking";
-const CONFIG_FILE: &str = "/Users/enrikes/.config/santander_ledger.json";
+const CONFIG_FILE: &str = ".config/santander_ledger.json";
 const HEADERS: &[&str] = &[
     "fecha_operacion",
     "fecha_valor",
@@ -93,7 +93,7 @@ fn skip_rows(range: Range<DataType>, n: u32) -> Result<Range<DataType>> {
     Ok(range.range((start.0 + n, start.1), end))
 }
 
-fn compute_transactions(path: &str, config: &Config) {
+fn compute_transactions(path: &str, config: Option<&Config>) {
     let mut workbook: Xls<_> = open_workbook(path).expect("Cannot open file");
     if let Some(Ok(worksheet)) = workbook.worksheet_range(SHEET_NAME) {
         let transactions_skipped =
@@ -108,12 +108,7 @@ fn compute_transactions(path: &str, config: &Config) {
     }
 }
 
-fn build_transaction_string(transaction: &Transaction, config: &Config) -> String {
-    // Want to use the config to write the transactions if the concept is already present. The way I
-    // want to do it is by taking a regex as the key on the config file. I would then:
-
-    // 1. Match the transaction.concepto with the regex that is stored in the key part of the hashmap.
-    // 2. If the key is matched, I'll take the value from the hashmap and fill the string below.
+fn build_transaction_string(transaction: &Transaction, config: Option<&Config>) -> String {
     let mut transaction_string = format!(
         "{} * {}\n    {}               {:.2}€\n",
         transaction
@@ -124,24 +119,29 @@ fn build_transaction_string(transaction: &Transaction, config: &Config) -> Strin
         ACCOUNT,
         transaction.importe
     );
-
-    if let Some(matched_concepto) = config.mappings.keys().find(|regex| {
-        Regex::new(regex)
-            .unwrap()
-            .is_match(transaction.concepto.as_str())
-    }) {
-        format!(
-            "{}    {}\n\n",
-            transaction_string,
-            config.mappings.get(matched_concepto).unwrap()
-        )
-    } else {
-        transaction_string.push('\n');
-        transaction_string
-    }
+    transaction_string = match config {
+        Some(config) => {
+            if let Some(matched_concepto) = config.mappings.keys().find(|regex| {
+                Regex::new(regex)
+                    .unwrap()
+                    .is_match(transaction.concepto.as_str())
+            }) {
+                format!(
+                    "{}    {}\n",
+                    transaction_string,
+                    config.mappings.get(matched_concepto).unwrap()
+                )
+            } else {
+                transaction_string
+            }
+        }
+        None => transaction_string,
+    };
+    transaction_string.push('\n');
+    transaction_string
 }
 
-fn write_transactions(transactions: &[Transaction], path: &str, config: &Config) {
+fn write_transactions(transactions: &[Transaction], path: &str, config: Option<&Config>) {
     let path = Path::new(path).with_extension("ledger");
     if let Ok(mut file) = File::create(path) {
         transactions.iter().for_each(|transaction| {
@@ -155,8 +155,16 @@ fn write_transactions(transactions: &[Transaction], path: &str, config: &Config)
 
 fn main() {
     let input_file = env::args().nth(1).expect("Please provide an input file.");
-    let file = File::open(CONFIG_FILE).unwrap();
-    let reader = BufReader::new(file);
-    let config: Config = serde_json::from_reader(reader).unwrap();
-    compute_transactions(input_file.as_str(), &config);
+    let home_dir = dirs::home_dir().unwrap().join(CONFIG_FILE);
+    let config: Option<Config> = if let Ok(file) = File::open(home_dir) {
+        let reader = BufReader::new(file);
+        match serde_json::from_reader::<BufReader<File>, Config>(reader) {
+            Ok(config) => Some(config),
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    compute_transactions(input_file.as_str(), config.as_ref());
 }
