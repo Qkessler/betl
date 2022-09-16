@@ -1,10 +1,10 @@
 use calamine::{open_workbook, DataType, Range, RangeDeserializerBuilder, Reader, Xls};
 use chrono::NaiveDate;
+use clap::Parser;
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{
     collections::HashMap,
-    env,
     fs::File,
     io::{self, BufReader, Error, Write},
     path::Path,
@@ -14,12 +14,21 @@ const SHEET_NAME: &str = "Movimientos";
 const ACCOUNT: &str = "Assets:Checking";
 const CONFIG_FILE: &str = ".config/santander_ledger.json";
 const HEADERS: &[&str] = &[
-    "fecha_operacion",
-    "fecha_valor",
-    "concepto",
-    "importe",
-    "saldo",
+    "operation_date",
+    "value_date",
+    "description",
+    "amount",
+    "total",
 ];
+
+/// Santander transactions parser. Example usage: santander-ledger -f /tmp/transactions.xls
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    /// Transactions file path.
+    #[clap(short, long)]
+    file: String,
+}
 
 pub fn deserialize_date<'de, D>(deserializer: D) -> Result<Option<NaiveDate>, D::Error>
 where
@@ -32,41 +41,16 @@ where
 #[derive(Serialize, Deserialize, Debug)]
 struct Transaction {
     #[serde(deserialize_with = "deserialize_date")]
-    fecha_operacion: Option<NaiveDate>,
+    operation_date: Option<NaiveDate>,
     #[serde(deserialize_with = "deserialize_date")]
-    fecha_valor: Option<NaiveDate>,
-    concepto: String,
-    importe: f32,
+    value_date: Option<NaiveDate>,
+    description: String,
+    amount: f32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Config {
     mappings: HashMap<String, String>,
-}
-
-fn skip_to_header_row(
-    range: Range<DataType>,
-    expected_headers: Vec<&str>,
-) -> io::Result<Range<DataType>> {
-    if let Some((ix, _)) = range.rows().enumerate().find(|(_, row)| {
-        expected_headers
-            .iter()
-            .all(|h| row.iter().any(|cell: &DataType| &cell.to_string() == h))
-    }) {
-        skip_rows(range, ix as u32)
-    } else {
-        println!(
-            "Couldn't find header row with expected headers: {:?}",
-            expected_headers
-        );
-        Err(Error::new(
-            io::ErrorKind::Other,
-            format!(
-                "Couldn't find header row with expected headers: {:?}",
-                expected_headers
-            ),
-        ))
-    }
 }
 
 fn skip_rows(range: Range<DataType>, n: u32) -> io::Result<Range<DataType>> {
@@ -87,19 +71,19 @@ fn build_transaction_string(transaction: &Transaction, config: Option<&Config>) 
     let mut transaction_string = format!(
         "{} * {}\n    {}               {:.2}€\n",
         transaction
-            .fecha_operacion
+            .operation_date
             .expect("Date should be present")
             .format("%Y-%m-%d"),
-        transaction.concepto,
+        transaction.description,
         ACCOUNT,
-        transaction.importe
+        transaction.amount
     );
     transaction_string = match config {
         Some(config) => {
             if let Some(matched_concepto) = config.mappings.keys().find(|regex| {
                 Regex::new(regex)
                     .unwrap()
-                    .is_match(transaction.concepto.as_str())
+                    .is_match(transaction.description.as_str())
             }) {
                 format!(
                     "{}    {}\n",
@@ -131,7 +115,11 @@ fn write_transactions(transactions: &[Transaction], path: &str, config: Option<&
 fn modify_headers(input_file: &str) -> io::Result<Range<DataType>> {
     let mut workbook: Xls<_> = open_workbook(input_file).expect("Cannot open file");
     if let Some(Ok(worksheet)) = workbook.worksheet_range(SHEET_NAME) {
-        Ok(skip_to_header_row(worksheet, HEADERS.to_vec()).expect("should work"))
+        let mut range = skip_rows(worksheet, 7).expect("should work");
+        HEADERS.iter().enumerate().for_each(|(i, header)| {
+            range.set_value((7, i as u32), DataType::String((*header).to_owned()))
+        });
+        Ok(range)
     } else {
         Err(Error::new(
             io::ErrorKind::Other,
@@ -141,7 +129,8 @@ fn modify_headers(input_file: &str) -> io::Result<Range<DataType>> {
 }
 
 fn main() {
-    let input_file = env::args().nth(1).expect("Please provide an input file.");
+    let args = Args::parse();
+    let input_file = args.file;
     let home_dir = dirs::home_dir().unwrap().join(CONFIG_FILE);
     let config: Option<Config> = if let Ok(file) = File::open(home_dir) {
         let reader = BufReader::new(file);
