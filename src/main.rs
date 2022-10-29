@@ -1,5 +1,5 @@
 use calamine::{open_workbook, DataType, Range, RangeDeserializerBuilder, Reader, Xls};
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Utc};
 use clap::Parser;
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -9,10 +9,13 @@ use std::{
     io::{self, BufReader, Error, Write},
     path::Path,
 };
+#[macro_use]
+extern crate lazy_static;
 
 const SHEET_NAME: &str = "Movimientos";
 const ACCOUNT: &str = "Assets:Checking";
 const CONFIG_FILE: &str = ".config/santander_ledger.json";
+const DATE_FORMAT: &str = "%d/%m/%Y";
 const HEADERS: &[&str] = &[
     "operation_date",
     "value_date",
@@ -34,8 +37,14 @@ pub fn deserialize_date<'de, D>(deserializer: D) -> Result<Option<NaiveDate>, D:
 where
     D: Deserializer<'de>,
 {
+    lazy_static! {
+        static ref DEFAULT_DATE: NaiveDate = Utc::now().date_naive();
+    }
     let data_type = calamine::DataType::deserialize(deserializer);
-    Ok(data_type?.as_date())
+    Ok(match data_type?.get_string() {
+        Some(date) => Some(NaiveDate::parse_from_str(date, DATE_FORMAT).unwrap_or(*DEFAULT_DATE)),
+        None => Some(*DEFAULT_DATE),
+    })
 }
 
 #[derive(Serialize, Deserialize, Debug)]
