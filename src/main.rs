@@ -1,6 +1,7 @@
 use calamine::{open_workbook, DataType, Range, RangeDeserializerBuilder, Reader, Xls};
 use chrono::{NaiveDate, Utc};
 use clap::{clap_derive::ArgEnum, Parser};
+use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{
@@ -9,8 +10,6 @@ use std::{
     io::{self, BufReader, Error, Write},
     path::Path,
 };
-#[macro_use]
-extern crate lazy_static;
 
 const SANTANDER_SHEET_NAME: &str = "Movimientos";
 const ACCOUNT: &str = "Assets:Checking";
@@ -37,6 +36,7 @@ enum Bank {
     Bankia,
     Santander,
 }
+static DEFAULT_DATE: Lazy<NaiveDate> = Lazy::new(|| Utc::now().date_naive());
 
 /// Santander transactions parser. Example usage: santander-ledger -f /tmp/transactions.xls
 #[derive(Parser, Debug)]
@@ -48,15 +48,15 @@ struct Args {
 
     #[clap(short, long, arg_enum)]
     bank: Bank,
+
+    #[clap(short, long, action)]
+    reverse: bool,
 }
 
 pub fn deserialize_date<'de, D>(deserializer: D) -> Result<Option<NaiveDate>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    lazy_static! {
-        static ref DEFAULT_DATE: NaiveDate = Utc::now().date_naive();
-    }
     let data_type = calamine::DataType::deserialize(deserializer)?;
     Ok(match data_type.as_date() {
         Some(date) => Some(date),
@@ -99,12 +99,22 @@ fn skip_rows(range: Range<DataType>, n: u32) -> io::Result<Range<DataType>> {
     Ok(range.range((start.0 + n, start.1), end))
 }
 
-fn parse_transactions(range: &Range<DataType>, config: &BankConfig) -> Vec<Transaction> {
-    RangeDeserializerBuilder::with_headers(config.headers)
+fn parse_transactions(
+    range: &Range<DataType>,
+    config: &BankConfig,
+    should_reverse: bool,
+) -> Vec<Transaction> {
+    let transactions: Vec<Transaction> = RangeDeserializerBuilder::with_headers(config.headers)
         .from_range::<_, Transaction>(range)
         .expect("Deserializer should work.")
         .map(|transaction| transaction.unwrap())
-        .collect()
+        .collect();
+
+    return if should_reverse {
+        transactions.into_iter().rev().collect()
+    } else {
+        transactions
+    };
 }
 
 fn build_transaction_string(transaction: &Transaction, config: Option<&Mappings>) -> String {
@@ -193,6 +203,7 @@ fn parse_config<'a>(bank: &Bank, sheet_name: Option<&'a str>) -> BankConfig<'a> 
 fn main() {
     let args = Args::parse();
     let input_file = args.file;
+    let should_reverse = args.reverse;
     let home_dir = dirs::home_dir().unwrap().join(CONFIG_FILE);
     let mappings: Option<Mappings> = if let Ok(file) = File::open(home_dir) {
         let reader = BufReader::new(file);
@@ -215,6 +226,6 @@ fn main() {
     let config = parse_config(&args.bank, sheet_name);
     let workbook = modify_headers(&input_file, &config)
         .unwrap_or_else(|e| panic!("Header modification failed. Error: {}", e));
-    let transactions = parse_transactions(&workbook, &config);
+    let transactions = parse_transactions(&workbook, &config, should_reverse);
     write_transactions(&transactions, &input_file, mappings.as_ref());
 }
