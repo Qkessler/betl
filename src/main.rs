@@ -12,7 +12,8 @@ use std::{
 };
 
 const SANTANDER_SHEET_NAME: &str = "Movimientos";
-const ACCOUNT: &str = "Assets:Checking";
+const SANTANDER_BASE_ACCOUNT: &str = "Assets:Checking";
+const BANKIA_BASE_ACCOUNT: &str = "Assets:Emergency fund";
 const CONFIG_FILE: &str = ".config/santander_ledger.json";
 const DATE_FORMAT: &str = "%d/%m/%Y";
 const SANTANDER_HEADERS: &[&str] = &[
@@ -38,7 +39,6 @@ enum Bank {
 }
 static DEFAULT_DATE: Lazy<NaiveDate> = Lazy::new(|| Utc::now().date_naive());
 
-/// Santander transactions parser. Example usage: santander-ledger -f /tmp/transactions.xls
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
@@ -69,9 +69,6 @@ where
     })
 }
 
-// cargo run -- -b bankia -f /tmp/Movimientos_cuenta_0262497.xls
-// cargo run -- -b santander -f /tmp/export20221126.xls
-
 #[derive(Serialize, Deserialize, Debug)]
 struct Transaction {
     #[serde(deserialize_with = "deserialize_date")]
@@ -86,6 +83,7 @@ struct BankConfig<'a> {
     skip_row_num: u32,
     headers: &'static [&'static str],
     sheet_name: &'a str,
+    base_account: &'a str,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -117,7 +115,11 @@ fn parse_transactions(
     };
 }
 
-fn build_transaction_string(transaction: &Transaction, config: Option<&Mappings>) -> String {
+fn build_transaction_string<'a>(
+    transaction: &Transaction,
+    config: Option<&Mappings>,
+    base_account: &'a str,
+) -> String {
     let mut transaction_string = format!(
         "{} * {}\n    {}               {:.2}€\n",
         transaction
@@ -125,7 +127,7 @@ fn build_transaction_string(transaction: &Transaction, config: Option<&Mappings>
             .expect("Date should be present")
             .format("%Y-%m-%d"),
         transaction.description,
-        ACCOUNT,
+        base_account,
         transaction.amount
     );
     transaction_string = match config {
@@ -150,11 +152,18 @@ fn build_transaction_string(transaction: &Transaction, config: Option<&Mappings>
     transaction_string
 }
 
-fn write_transactions(transactions: &[Transaction], path: &str, config: Option<&Mappings>) {
+fn write_transactions(
+    transactions: &[Transaction],
+    path: &str,
+    mappings_config: Option<&Mappings>,
+    config: &BankConfig,
+) {
     let path = Path::new(path).with_extension("ledger");
+    let base_account = config.base_account;
     if let Ok(mut file) = File::create(path) {
         transactions.iter().for_each(|transaction| {
-            let transaction_string = build_transaction_string(transaction, config);
+            let transaction_string =
+                build_transaction_string(transaction, mappings_config, base_account);
             print!("{}", transaction_string);
             file.write_all(transaction_string.as_bytes())
                 .unwrap_or_else(|_| panic!("Unable to write transaction {:?}", transaction));
@@ -191,11 +200,13 @@ fn parse_config<'a>(bank: &Bank, sheet_name: Option<&'a str>) -> BankConfig<'a> 
             headers: BANKIA_HEADERS,
             sheet_name: sheet_name
                 .unwrap_or_else(|| panic!("Should have sheet_name passed as parameter.")),
+            base_account: BANKIA_BASE_ACCOUNT,
         },
         Bank::Santander => BankConfig {
             skip_row_num: 7,
             headers: SANTANDER_HEADERS,
             sheet_name: sheet_name.unwrap_or_else(|| SANTANDER_SHEET_NAME),
+            base_account: SANTANDER_BASE_ACCOUNT,
         },
     }
 }
@@ -227,5 +238,5 @@ fn main() {
     let workbook = modify_headers(&input_file, &config)
         .unwrap_or_else(|e| panic!("Header modification failed. Error: {}", e));
     let transactions = parse_transactions(&workbook, &config, should_reverse);
-    write_transactions(&transactions, &input_file, mappings.as_ref());
+    write_transactions(&transactions, &input_file, mappings.as_ref(), &config);
 }

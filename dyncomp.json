@@ -1,0 +1,4 @@
+{
+    "run": "cargo check",
+    "test": "cargo test -v"
+}

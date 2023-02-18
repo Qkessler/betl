@@ -1,1 +1,42 @@
-will try to do it in Rust.
+* =betl=
+
+Bank Extract To Ledger (=betl=) is a CLI tool created in Rust to parse xls files that bank entities return when extracting transaction data from accounts or credit cards. When parsed, it creates a [[https://www.ledger-cli.org/3.0/doc/ledger-mode.html][ledger file]], for easy zero account managing of your transactions.
+
+Currently, two banks have been implemented:
+
+- *Santander*, which outputs files of the likes of =export2023218.xls=.
+- *CaixaBank*, with files like =Movimientos_cuenta_0262497.xls= or similar.
+
+Since I haven't taken into account regionalization of the format of the files, your Santander (UK) or CaikaBank DE account might not work correctly. Here are the format variables.
+
+- headers: Headers that should be parsed on the XLS file, that conforms a =Transaction=.
+- skip_row_num: Number of rows to skip when parsing. Some banks (Santander and CaixaBank, for example) have some banner at the top of the XLS file.
+- sheet_name: Sheet name with the transactions. Defaults should work.
+- base_account: Account to remove the money from, when creating the Ledger transactions.
+
+To use it, compile the binary:
+#+begin_src bash-ts
+  git clone git@github.com:Qkessler/betl.git
+  cargo build --release
+#+end_src
+
+With that, you should have under the target/release directory, a binary called =betl=.
+
+Example usages:
+#+begin_src bash-ts
+  betl -b santander -f /tmp/export2023218.xls
+  betl -b bankia -f /tmp/Movimientos_cuenta_0262497.xls
+#+end_src
+
+Where the =-b= option delimits the Bank that you are parsing from and the =-f= option sets the file to parse. The path can be relative to the current working directory or absolute.
+
+=betl= will then create a ledger file with the same name as the one passed in, and also output the transactions parsed on the standard output. Here's the example output:
+#+begin_src ledger
+  2023-02-17 * Recibo Paypal (europe) S.a R.l. Et Cie, S.c.a. Nº Recibo 0049 6773 755 Bbcgxgx Ref. Mandato 4cxj224wtckp6, De
+      Assets:Checking                           -15.99€
+
+  2023-02-20 * Pago Movil En El Canton De Lu, Cartagena, Tarj. :*157901
+      Assets:Checking                           -44.00€
+#+end_src
+
+Assets:Checking is the base account that I set up for my santander account.
