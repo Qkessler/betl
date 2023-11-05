@@ -1,19 +1,24 @@
-use calamine::{open_workbook, DataType, Range, RangeDeserializerBuilder, Reader, Xls};
+mod bank_statement;
+mod banks;
+
+use bank_statement::{BankStatement, RevolutBankStatement, RevolutTransaction, XlsBankStatement};
+use banks::{Bank, BankConfig};
 use chrono::{NaiveDate, Utc};
-use clap::{clap_derive::ArgEnum, Parser};
+use clap::Parser;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{
     collections::HashMap,
     fs::File,
-    io::{self, BufReader, Error, Write},
+    io::{BufReader, Write},
     path::Path,
 };
 
 const SANTANDER_SHEET_NAME: &str = "Movimientos";
 const SANTANDER_BASE_ACCOUNT: &str = "Assets:Checking";
 const BANKIA_BASE_ACCOUNT: &str = "Assets:Emergency fund";
+const REVOLUT_BASE_ACCOUNT: &str = "Assets:Revolut";
 const CONFIG_FILE: &str = ".config/santander_ledger.json";
 const DATE_FORMAT: &str = "%d/%m/%Y";
 const SANTANDER_HEADERS: &[&str] = &[
@@ -31,12 +36,19 @@ const BANKIA_HEADERS: &[&str] = &[
     "amount",
     "total",
 ];
+const REVOLUT_HEADERS: &[&str] = &[
+    "type",
+    "product",
+    "operation_date",
+    "value_date",
+    "description",
+    "amount",
+    "fee",
+    "currency",
+    "state",
+    "total",
+];
 
-#[derive(Debug, PartialEq, Clone, ArgEnum)]
-enum Bank {
-    Bankia,
-    Santander,
-}
 static DEFAULT_DATE: Lazy<NaiveDate> = Lazy::new(|| Utc::now().date_naive());
 
 #[derive(Parser, Debug)]
@@ -70,7 +82,7 @@ where
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct Transaction {
+pub struct Transaction {
     #[serde(deserialize_with = "deserialize_date")]
     operation_date: Option<NaiveDate>,
     #[serde(deserialize_with = "deserialize_date")]
@@ -79,40 +91,9 @@ struct Transaction {
     amount: f32,
 }
 
-struct BankConfig<'a> {
-    skip_row_num: u32,
-    headers: &'static [&'static str],
-    sheet_name: &'a str,
-    base_account: &'a str,
-}
-
 #[derive(Serialize, Deserialize, Debug)]
 struct Mappings {
     mappings: HashMap<String, String>,
-}
-
-fn skip_rows(range: Range<DataType>, n: u32) -> io::Result<Range<DataType>> {
-    let start = range.start().unwrap();
-    let end = range.end().unwrap();
-    Ok(range.range((start.0 + n, start.1), end))
-}
-
-fn parse_transactions(
-    range: &Range<DataType>,
-    config: &BankConfig,
-    should_reverse: bool,
-) -> Vec<Transaction> {
-    let transactions: Vec<Transaction> = RangeDeserializerBuilder::with_headers(config.headers)
-        .from_range::<_, Transaction>(range)
-        .expect("Deserializer should work.")
-        .map(|transaction| transaction.unwrap())
-        .collect();
-
-    return if should_reverse {
-        transactions.into_iter().rev().collect()
-    } else {
-        transactions
-    };
 }
 
 fn build_transaction_string<'a>(
@@ -171,28 +152,6 @@ fn write_transactions(
     }
 }
 
-fn modify_headers(input_file: &str, config: &BankConfig) -> io::Result<Range<DataType>> {
-    let mut workbook: Xls<_> = open_workbook(input_file).expect("Cannot open file");
-    if let Some(Ok(worksheet)) = workbook.worksheet_range(config.sheet_name) {
-        let mut range = skip_rows(worksheet, config.skip_row_num).expect("should work");
-        config.headers.iter().enumerate().for_each(|(i, header)| {
-            range.set_value(
-                (config.skip_row_num, i as u32),
-                DataType::String((*header).to_owned()),
-            )
-        });
-        Ok(range)
-    } else {
-        Err(Error::new(
-            io::ErrorKind::Other,
-            format!(
-                "Couldn't open worksheet for SHEET_NAME = {:?}",
-                config.sheet_name
-            ),
-        ))
-    }
-}
-
 fn parse_config<'a>(bank: &Bank, sheet_name: Option<&'a str>) -> BankConfig<'a> {
     match bank {
         Bank::Bankia => BankConfig {
@@ -207,6 +166,13 @@ fn parse_config<'a>(bank: &Bank, sheet_name: Option<&'a str>) -> BankConfig<'a> 
             headers: SANTANDER_HEADERS,
             sheet_name: sheet_name.unwrap_or_else(|| SANTANDER_SHEET_NAME),
             base_account: SANTANDER_BASE_ACCOUNT,
+        },
+        Bank::Revolut => BankConfig {
+            skip_row_num: 0,
+            headers: REVOLUT_HEADERS,
+            sheet_name: sheet_name
+                .unwrap_or_else(|| panic!("Should have sheet_name passed as parameter.")),
+            base_account: REVOLUT_BASE_ACCOUNT,
         },
     }
 }
@@ -232,11 +198,22 @@ fn main() {
     let sheet_name: Option<&str> = match &args.bank {
         Bank::Bankia => Some(file_without_extension.to_str().unwrap_or_default()),
         Bank::Santander => None,
+        Bank::Revolut => Some(file_without_extension.to_str().unwrap_or_default()),
     };
 
     let config = parse_config(&args.bank, sheet_name);
-    let workbook = modify_headers(&input_file, &config)
-        .unwrap_or_else(|e| panic!("Header modification failed. Error: {}", e));
-    let transactions = parse_transactions(&workbook, &config, should_reverse);
+    let transactions = match &args.bank {
+        Bank::Bankia | Bank::Santander => XlsBankStatement::parse_transactions::<Transaction>(
+            &input_file,
+            &config,
+            should_reverse,
+        ),
+        Bank::Revolut => RevolutBankStatement::parse_transactions::<RevolutTransaction>(
+            &input_file,
+            &config,
+            should_reverse,
+        ),
+    };
+    println!("{:?}", transactions);
     write_transactions(&transactions, &input_file, mappings.as_ref(), &config);
 }
