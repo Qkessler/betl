@@ -2,12 +2,15 @@
 
 Bank Extract To Ledger (=betl=) is a CLI tool created in Rust to parse xls files that bank entities return when extracting transaction data from accounts or credit cards. When parsed, it creates a [[https://www.ledger-cli.org/3.0/doc/ledger-mode.html][ledger file]], for easy zero account managing of your transactions.
 
-Currently, two banks have been implemented:
+Currently, three banks have been implemented:
 
 - *Santander*, which outputs files of the likes of =export2023218.xls=.
 - *CaixaBank*, with files like =Movimientos_cuenta_0262497.xls= or similar.
+- *Revolut*, just outputting the bank statements to CSV.
 
-Since I haven't taken into account regionalization of the format of the files, your Santander (UK) or CaikaBank DE account might not work correctly. Here are the format variables.
+*NOTE*: Since I haven't taken into account regionalization of the format of the files, your Santander (UK) or CaikaBank DE account might not work correctly. If that's the case, please, create an issue and I'm happy to take PRs to fix it.
+
+Here are the format variables.
 
 - headers: Headers that should be parsed on the XLS file, that conforms a =Transaction=.
 - skip_row_num: Number of rows to skip when parsing. Some banks (Santander and CaixaBank, for example) have some banner at the top of the XLS file.
