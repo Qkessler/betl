@@ -19,7 +19,8 @@ const SANTANDER_SHEET_NAME: &str = "Movimientos";
 const SANTANDER_BASE_ACCOUNT: &str = "Assets:Checking";
 const BANKIA_BASE_ACCOUNT: &str = "Assets:Emergency fund";
 const REVOLUT_BASE_ACCOUNT: &str = "Assets:Revolut";
-const CONFIG_FILE: &str = ".config/santander_ledger.json";
+const EVO_BANK_BASE_ACCOUNT: &str = "Assets:EvoBank";
+const CONFIG_FILE: &str = ".config/betl.json";
 const DATE_FORMAT: &str = "%d/%m/%Y";
 const SANTANDER_HEADERS: &[&str] = &[
     "operation_date",
@@ -46,6 +47,14 @@ const REVOLUT_HEADERS: &[&str] = &[
     "fee",
     "currency",
     "state",
+    "total",
+];
+const EVO_BANK_HEADERS: &[&str] = &[
+    "operation_date",
+    "value_date",
+    "description",
+    "amount",
+    "currency",
     "total",
 ];
 
@@ -174,6 +183,13 @@ fn parse_config<'a>(bank: &Bank, sheet_name: Option<&'a str>) -> BankConfig<'a> 
                 .unwrap_or_else(|| panic!("Should have sheet_name passed as parameter.")),
             base_account: REVOLUT_BASE_ACCOUNT,
         },
+        Bank::EvoBank => BankConfig {
+            skip_row_num: 1,
+            headers: EVO_BANK_HEADERS,
+            sheet_name: sheet_name
+                .unwrap_or_else(|| panic!("Should have sheet_name passed as parameter.")),
+            base_account: EVO_BANK_BASE_ACCOUNT,
+        },
     }
 }
 
@@ -195,18 +211,20 @@ fn main() {
     let file_without_extension = Path::new(&input_file)
         .file_stem()
         .unwrap_or_else(|| panic!("Should be able to get real file name."));
+    let file_name = file_without_extension.to_str().unwrap_or_default();
     let sheet_name: Option<&str> = match &args.bank {
-        Bank::Bankia => Some(file_without_extension.to_str().unwrap_or_default()),
+        Bank::Bankia => Some(file_name),
         Bank::Santander => None,
-        Bank::Revolut => Some(file_without_extension.to_str().unwrap_or_default()),
+        Bank::Revolut => Some(file_name),
+        Bank::EvoBank => Some(file_name),
     };
 
     let config = parse_config(&args.bank, sheet_name);
     let transactions = match &args.bank {
-        Bank::Bankia | Bank::Santander => XlsBankStatement::parse_transactions::<Transaction>(
-            &input_file,
-            &config,
-            should_reverse,
+        Bank::Bankia | Bank::Santander | Bank::EvoBank => XlsBankStatement::parse_transactions::<
+            Transaction,
+        >(
+            &input_file, &config, should_reverse
         ),
         Bank::Revolut => RevolutBankStatement::parse_transactions::<RevolutTransaction>(
             &input_file,
@@ -214,6 +232,5 @@ fn main() {
             should_reverse,
         ),
     };
-    println!("{:?}", transactions);
     write_transactions(&transactions, &input_file, mappings.as_ref(), &config);
 }

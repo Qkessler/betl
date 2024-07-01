@@ -62,11 +62,11 @@ impl BankStatement for RevolutBankStatement {
             .map(|transaction: RevolutTransaction| Self::convert(transaction))
             .collect();
 
-        return if should_reverse {
+        if should_reverse {
             transactions.into_iter().rev().collect()
         } else {
             transactions
-        };
+        }
     }
 }
 impl TransactionConverter<RevolutTransaction> for RevolutBankStatement {
@@ -131,10 +131,10 @@ impl BankStatement for XlsBankStatement {
             .map(|transaction| transaction.unwrap())
             .collect();
 
-        return if should_reverse {
+        if should_reverse {
             transactions.into_iter().rev().collect()
         } else {
             transactions
-        };
+        }
     }
 }

@@ -5,6 +5,7 @@ pub enum Bank {
     Bankia,
     Santander,
     Revolut,
+    EvoBank,
 }
 
 pub struct BankConfig<'a> {
