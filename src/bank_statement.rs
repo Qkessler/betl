@@ -73,10 +73,14 @@ impl TransactionConverter<RevolutTransaction> for RevolutBankStatement {
     fn convert(transaction: RevolutTransaction) -> Transaction {
         let operation_date =
             NaiveDateTime::parse_from_str(&transaction.operation_date, "%Y-%m-%d %H:%M:%S")
-                .expect("date to be passed in the correct format");
+                .unwrap_or_else(|e| {
+                    panic!("Date should be passed in the correct format {transaction:?}: {e}",)
+                });
         let value_date =
             NaiveDateTime::parse_from_str(&transaction.value_date, "%Y-%m-%d %H:%M:%S")
-                .expect("date to be passed in the correct format");
+                .unwrap_or_else(|e| {
+                    panic!("Date should be passed in the correct format {transaction:?}: {e}",)
+                });
         Transaction {
             operation_date: Some(operation_date.date()),
             value_date: Some(value_date.date()),

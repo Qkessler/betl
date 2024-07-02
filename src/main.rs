@@ -216,7 +216,7 @@ fn main() {
         Bank::Bankia => Some(file_name),
         Bank::Santander => None,
         Bank::Revolut => Some(file_name),
-        Bank::EvoBank => Some(file_name),
+        Bank::EvoBank => Some("Movimientos"),
     };
 
     let config = parse_config(&args.bank, sheet_name);
