@@ -1,8 +1,9 @@
 mod bank_statement;
 mod banks;
 
-use bank_statement::{BankStatement, RevolutBankStatement, RevolutTransaction, XlsBankStatement};
+use bank_statement::{BankStatement, ExcelBankStatement, RevolutBankStatement, RevolutTransaction};
 use banks::{Bank, BankConfig};
+use calamine::{Xls, Xlsx};
 use chrono::{NaiveDate, Utc};
 use clap::Parser;
 use once_cell::sync::Lazy;
@@ -20,6 +21,7 @@ const SANTANDER_BASE_ACCOUNT: &str = "Assets:Checking";
 const BANKIA_BASE_ACCOUNT: &str = "Assets:Emergency fund";
 const REVOLUT_BASE_ACCOUNT: &str = "Assets:Revolut";
 const EVO_BANK_BASE_ACCOUNT: &str = "Assets:EvoBank";
+const BANKINTER_BASE_ACCOUNT: &str = "Assets:Bankinter";
 const CONFIG_FILE: &str = ".config/betl.json";
 const DATE_FORMAT: &str = "%d/%m/%Y";
 const SANTANDER_HEADERS: &[&str] = &[
@@ -56,6 +58,14 @@ const EVO_BANK_HEADERS: &[&str] = &[
     "amount",
     "currency",
     "total",
+];
+const BANKINTER_HEADERS: &[&str] = &[
+    "operation_date",
+    "value_date",
+    "description",
+    "amount",
+    "total",
+    "currency",
 ];
 
 static DEFAULT_DATE: Lazy<NaiveDate> = Lazy::new(|| Utc::now().date_naive());
@@ -190,6 +200,13 @@ fn parse_config<'a>(bank: &Bank, sheet_name: Option<&'a str>) -> BankConfig<'a> 
                 .unwrap_or_else(|| panic!("Should have sheet_name passed as parameter.")),
             base_account: EVO_BANK_BASE_ACCOUNT,
         },
+        Bank::Bankinter => BankConfig {
+            skip_row_num: 8,
+            headers: BANKINTER_HEADERS,
+            sheet_name: sheet_name
+                .unwrap_or_else(|| panic!("Should have sheet_name passed as parameter.")),
+            base_account: BANKIA_BASE_ACCOUNT,
+        },
     }
 }
 
@@ -200,10 +217,7 @@ fn main() {
     let home_dir = dirs::home_dir().unwrap().join(CONFIG_FILE);
     let mappings: Option<Mappings> = if let Ok(file) = File::open(home_dir) {
         let reader = BufReader::new(file);
-        match serde_json::from_reader::<BufReader<File>, Mappings>(reader) {
-            Ok(config) => Some(config),
-            Err(_) => None,
-        }
+        serde_json::from_reader::<BufReader<File>, Mappings>(reader).ok()
     } else {
         None
     };
@@ -216,15 +230,22 @@ fn main() {
         Bank::Bankia => Some(file_name),
         Bank::Santander => None,
         Bank::Revolut => Some(file_name),
-        Bank::EvoBank => Some("Movimientos"),
+        Bank::EvoBank | Bank::Bankinter => Some("Movimientos"),
     };
 
     let config = parse_config(&args.bank, sheet_name);
     let transactions = match &args.bank {
-        Bank::Bankia | Bank::Santander | Bank::EvoBank => XlsBankStatement::parse_transactions::<
-            Transaction,
-        >(
-            &input_file, &config, should_reverse
+        Bank::Bankia | Bank::Santander | Bank::EvoBank => {
+            ExcelBankStatement::<Xls<_>>::parse_transactions::<Transaction>(
+                &input_file,
+                &config,
+                should_reverse,
+            )
+        }
+        Bank::Bankinter => ExcelBankStatement::<Xlsx<_>>::parse_transactions::<Transaction>(
+            &input_file,
+            &config,
+            should_reverse,
         ),
         Bank::Revolut => RevolutBankStatement::parse_transactions::<RevolutTransaction>(
             &input_file,

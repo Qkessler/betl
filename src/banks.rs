@@ -6,6 +6,7 @@ pub enum Bank {
     Santander,
     Revolut,
     EvoBank,
+    Bankinter,
 }
 
 pub struct BankConfig<'a> {

@@ -1,9 +1,12 @@
-use std::io::{self, Error, ErrorKind};
+use std::{
+    io::{self, Error},
+    marker::PhantomData,
+};
 
 use super::banks::BankConfig;
 use crate::Transaction;
 
-use calamine::{open_workbook, DataType, Range, RangeDeserializerBuilder, Reader, Xls};
+use calamine::{open_workbook, DataType, Range, RangeDeserializerBuilder, Xls, Xlsx};
 use chrono::NaiveDateTime;
 use serde::Deserialize;
 
@@ -90,8 +93,12 @@ impl TransactionConverter<RevolutTransaction> for RevolutBankStatement {
     }
 }
 
-pub struct XlsBankStatement;
-impl XlsBankStatement {
+pub struct ExcelBankStatement<ExcelType> {
+    _excel_type: PhantomData<ExcelType>,
+}
+impl<ExcelType: calamine::Reader<RS = std::io::BufReader<std::fs::File>>>
+    ExcelBankStatement<ExcelType>
+{
     fn skip_rows(range: Range<DataType>, n: u32) -> io::Result<Range<DataType>> {
         let start = range.start().unwrap();
         let end = range.end().unwrap();
@@ -99,7 +106,7 @@ impl XlsBankStatement {
     }
 
     fn modify_headers(input_file: &str, config: &BankConfig) -> io::Result<Range<DataType>> {
-        let mut workbook: Xls<_> = open_workbook(input_file).expect("Cannot open file");
+        let mut workbook: ExcelType = open_workbook(input_file).expect("Cannot open file");
         if let Some(Ok(worksheet)) = workbook.worksheet_range(config.sheet_name) {
             let mut range = Self::skip_rows(worksheet, config.skip_row_num).expect("should work");
             config.headers.iter().enumerate().for_each(|(i, header)| {
@@ -110,24 +117,23 @@ impl XlsBankStatement {
             });
             Ok(range)
         } else {
-            Err(Error::new(
-                ErrorKind::Other,
-                format!(
-                    "Couldn't open worksheet for SHEET_NAME = {:?}",
-                    config.sheet_name
-                ),
-            ))
+            Err(Error::other(format!(
+                "Couldn't open worksheet for SHEET_NAME = {:?}",
+                config.sheet_name
+            )))
         }
     }
 }
 
-impl BankStatement for XlsBankStatement {
-    fn parse_transactions<T>(
+impl<ExcelType: calamine::Reader<RS = std::io::BufReader<std::fs::File>>>
+    ExcelBankStatement<ExcelType>
+{
+    fn parse_transactions_impl(
         input_file: &str,
         config: &BankConfig,
         should_reverse: bool,
     ) -> Vec<Transaction> {
-        let workbook = Self::modify_headers(&input_file, &config)
+        let workbook = Self::modify_headers(input_file, config)
             .unwrap_or_else(|e| panic!("Header modification failed. Error: {}", e));
         let transactions: Vec<Transaction> = RangeDeserializerBuilder::with_headers(config.headers)
             .from_range::<_, Transaction>(&workbook)
@@ -140,5 +146,25 @@ impl BankStatement for XlsBankStatement {
         } else {
             transactions
         }
+    }
+}
+
+impl BankStatement for ExcelBankStatement<Xls<std::io::BufReader<std::fs::File>>> {
+    fn parse_transactions<T>(
+        input_file: &str,
+        config: &BankConfig,
+        should_reverse: bool,
+    ) -> Vec<Transaction> {
+        Self::parse_transactions_impl(input_file, config, should_reverse)
+    }
+}
+
+impl BankStatement for ExcelBankStatement<Xlsx<std::io::BufReader<std::fs::File>>> {
+    fn parse_transactions<T>(
+        input_file: &str,
+        config: &BankConfig,
+        should_reverse: bool,
+    ) -> Vec<Transaction> {
+        Self::parse_transactions_impl(input_file, config, should_reverse)
     }
 }
