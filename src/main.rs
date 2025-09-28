@@ -183,7 +183,7 @@ fn parse_config<'a>(bank: &Bank, sheet_name: Option<&'a str>) -> BankConfig<'a> 
         Bank::Santander => BankConfig {
             skip_row_num: 7,
             headers: SANTANDER_HEADERS,
-            sheet_name: sheet_name.unwrap_or_else(|| SANTANDER_SHEET_NAME),
+            sheet_name: sheet_name.unwrap_or(SANTANDER_SHEET_NAME),
             base_account: SANTANDER_BASE_ACCOUNT,
         },
         Bank::Revolut => BankConfig {
@@ -205,7 +205,7 @@ fn parse_config<'a>(bank: &Bank, sheet_name: Option<&'a str>) -> BankConfig<'a> 
             headers: BANKINTER_HEADERS,
             sheet_name: sheet_name
                 .unwrap_or_else(|| panic!("Should have sheet_name passed as parameter.")),
-            base_account: BANKIA_BASE_ACCOUNT,
+            base_account: BANKINTER_BASE_ACCOUNT,
         },
     }
 }
